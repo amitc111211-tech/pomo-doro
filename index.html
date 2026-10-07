@@ -99,9 +99,23 @@
         <div class="timer-text mb-8" id="timerDisplay">25:00</div>
 
         <!-- Controls -->
-        <div class="flex gap-4 mb-8">
+        <div class="flex gap-4 mb-4 flex-wrap justify-center">
             <button onclick="setTimer(25)" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm">25 Min Work</button>
             <button onclick="setTimer(5)" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm">5 Min Break</button>
+        </div>
+
+        <!-- Custom Timer -->
+        <div class="flex gap-3 mb-8 items-center justify-center">
+            <input
+                type="number"
+                id="customMinutes"
+                min="1"
+                max="999"
+                placeholder="Min"
+                class="w-20 px-3 py-2 rounded-lg text-sm text-white text-center placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/60 transition"
+                style="background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(8px);"
+            >
+            <button onclick="setCustomTimer()" class="px-4 py-2 rounded-lg bg-indigo-600/50 hover:bg-indigo-500/70 transition text-sm font-semibold shadow-[0_0_10px_rgba(99,102,241,0.25)]">Set Custom</button>
         </div>
 
         <div class="flex gap-4 w-full">
@@ -174,6 +188,17 @@
             timeLeft = minutes * 60;
             updateDisplay();
             resetTimer();
+        }
+
+        function setCustomTimer() {
+            const input = document.getElementById('customMinutes');
+            const val = parseInt(input.value, 10);
+            if (!val || val < 1 || val > 999) {
+                input.style.borderColor = 'rgba(239,68,68,0.7)';
+                setTimeout(() => input.style.borderColor = 'rgba(255,255,255,0.15)', 1200);
+                return;
+            }
+            setTimer(val);
         }
 
         function toggleTimer() {
