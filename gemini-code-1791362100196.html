@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Focus Timer | Amit ka Studio</title>
+    
+    <!-- Tailwind CSS for Aesthetic UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe for AI Face Tracking -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Animated Background Blobs */
+        .blob {
+            position: absolute;
+            filter: blur(100px);
+            opacity: 0.4;
+            border-radius: 50%;
+            animation: move 10s infinite alternate;
+            z-index: 0;
+        }
+        .blob-1 { width: 400px; height: 400px; background: #6366f1; top: -100px; left: -100px; }
+        .blob-2 { width: 350px; height: 350px; background: #ec4899; bottom: -50px; right: -100px; }
+
+        @keyframes move {
+            from { transform: translate(0, 0) scale(1); }
+            to { transform: translate(50px, 50px) scale(1.1); }
+        }
+
+        /* Glassmorphism Card */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+
+        /* Timer Font */
+        .timer-text {
+            font-size: 6rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            background: -webkit-linear-gradient(#fff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0px 4px 20px rgba(255,255,255,0.1);
+        }
+
+        /* Camera Feed */
+        .cam-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border-radius: 12px;
+            overflow: hidden;
+            z-index: 20;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            transition: opacity 0.3s;
+        }
+        .cam-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror effect */
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Background Decoration -->
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <!-- Main App Container -->
+    <div class="glass-card rounded-3xl p-10 flex flex-col items-center w-[90%] max-w-lg text-center relative">
+        <h1 class="text-2xl font-bold mb-2 text-indigo-300">Amit ka Studio</h1>
+        <p class="text-sm text-slate-400 mb-8" id="statusText">AI Camera Initializing... Please wait.</p>
+
+        <!-- Timer -->
+        <div class="timer-text mb-8" id="timerDisplay">25:00</div>
+
+        <!-- Controls -->
+        <div class="flex gap-4 mb-8">
+            <button onclick="setTimer(25)" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm">25 Min Work</button>
+            <button onclick="setTimer(5)" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm">5 Min Break</button>
+        </div>
+
+        <div class="flex gap-4 w-full">
+            <button id="startBtn" onclick="toggleTimer()" class="flex-1 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-bold transition text-lg shadow-[0_0_15px_rgba(99,102,241,0.5)]">
+                Start Focus
+            </button>
+            <button onclick="resetTimer()" class="py-3 px-6 rounded-xl bg-slate-700 hover:bg-slate-600 font-bold transition text-lg">
+                Reset
+            </button>
+        </div>
+    </div>
+
+    <!-- Small Camera Feed Corner -->
+    <div class="cam-container glass-card" id="camContainer">
+        <video id="webcam" autoplay playsinline></video>
+        <div class="absolute bottom-1 left-0 w-full text-center text-xs bg-black/50 text-white py-1" id="aiStatus">
+            Face Tracker Active
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // --- TIMER VARIABLES ---
+        let timeLeft = 25 * 60;
+        let timerInterval = null;
+        let isRunning = false;
+        let isManuallyPaused = true;
+
+        // --- AI VARIABLES ---
+        let noFaceCounter = 0;
+        let isDistracted = false;
+        let aiEnabled = false;
+
+        // --- AUDIO SETUP (Beep & Speech) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeep() {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); // Sharp beep
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+            setTimeout(() => oscillator.stop(), 200);
+        }
+
+        function speakWarning() {
+            window.speechSynthesis.cancel(); // Stop current speech
+            let utterance = new SpeechSynthesisUtterance("Focus on your study!");
+            utterance.rate = 1.2;
+            utterance.pitch = 1;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- TIMER LOGIC ---
+        const timerDisplay = document.getElementById('timerDisplay');
+        const startBtn = document.getElementById('startBtn');
+        const statusText = document.getElementById('statusText');
+        const aiStatus = document.getElementById('aiStatus');
+
+        function updateDisplay() {
+            let m = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+            let s = (timeLeft % 60).toString().padStart(2, '0');
+            timerDisplay.innerText = `${m}:${s}`;
+        }
+
+        function setTimer(minutes) {
+            timeLeft = minutes * 60;
+            updateDisplay();
+            resetTimer();
+        }
+
+        function toggleTimer() {
+            if (audioCtx.state === 'suspended') audioCtx.resume(); // Unlock audio on first click
+            
+            if (isRunning) {
+                // Manual Pause
+                clearInterval(timerInterval);
+                isRunning = false;
+                isManuallyPaused = true;
+                startBtn.innerText = "Resume Focus";
+                startBtn.classList.replace("bg-red-500", "bg-indigo-600");
+                statusText.innerText = "Timer Paused Manually.";
+            } else {
+                // Start Timer
+                isManuallyPaused = false;
+                isRunning = true;
+                startBtn.innerText = "Pause";
+                startBtn.classList.replace("bg-indigo-600", "bg-red-500");
+                statusText.innerText = aiEnabled ? "Focus Mode ON. AI is watching you!" : "Focus Mode ON (Manual).";
+                
+                timerInterval = setInterval(() => {
+                    if (timeLeft > 0) {
+                        timeLeft--;
+                        updateDisplay();
+                    } else {
+                        clearInterval(timerInterval);
+                        isRunning = false;
+                        startBtn.innerText = "Start Focus";
+                        playBeep();
+                        playBeep();
+                        statusText.innerText = "Session Complete!";
+                    }
+                }, 1000);
+            }
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            isRunning = false;
+            isManuallyPaused = true;
+            startBtn.innerText = "Start Focus";
+            startBtn.classList.replace("bg-red-500", "bg-indigo-600");
+            statusText.innerText = "Ready to focus.";
+            updateDisplay();
+        }
+
+        // --- AI FACE TRACKING LOGIC (MediaPipe) ---
+        const videoElement = document.getElementById('webcam');
+
+        function handleDistraction() {
+            if (isRunning && !isManuallyPaused) {
+                // AI Pauses Timer
+                clearInterval(timerInterval);
+                isRunning = false;
+                startBtn.innerText = "Auto-Paused!";
+                startBtn.classList.replace("bg-red-500", "bg-yellow-500");
+                
+                // Visual & Audio Alerts
+                statusText.innerText = "🚨 DISTRACTION DETECTED! Look at screen! 🚨";
+                statusText.classList.add("text-red-400", "font-bold");
+                
+                playBeep();
+                speakWarning();
+            }
+        }
+
+        function handleFocus() {
+            if (!isRunning && !isManuallyPaused && timeLeft > 0) {
+                // AI Resumes Timer automatically
+                isRunning = true;
+                startBtn.innerText = "Pause";
+                startBtn.classList.replace("bg-yellow-500", "bg-red-500");
+                statusText.innerText = "Focus Mode ON. Good job!";
+                statusText.classList.remove("text-red-400", "font-bold");
+
+                timerInterval = setInterval(() => {
+                    if (timeLeft > 0) { timeLeft--; updateDisplay(); }
+                }, 1000);
+            }
+        }
+
+        function onResults(results) {
+            aiEnabled = true;
+
+            // 1. NO FACE DETECTED
+            if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+                noFaceCounter++;
+                aiStatus.innerText = "No Face Detected!";
+                aiStatus.style.background = "rgba(239, 68, 68, 0.8)"; // Red
+
+                // 30 frames ~ 1 second. If no face for ~2 seconds, trigger distraction.
+                if (noFaceCounter > 45 && !isDistracted) {
+                    isDistracted = true;
+                    handleDistraction();
+                }
+                return;
+            }
+
+            // Face Found, Reset Counter
+            noFaceCounter = 0;
+            const landmarks = results.multiFaceLandmarks[0];
+
+            // 2. CALCULATE HEAD POSE
+            // Using landmarks: 33 (Left Eye), 263 (Right Eye), 1 (Nose Tip)
+            const leftEye = landmarks[33];
+            const rightEye = landmarks[263];
+            const nose = landmarks[1];
+
+            // Center of the face (between eyes)
+            const faceCenterX = (leftEye.x + rightEye.x) / 2;
+            const faceCenterY = (leftEye.y + rightEye.y) / 2;
+
+            // Difference between nose and face center
+            const yaw = nose.x - faceCenterX;  // Left/Right turning
+            const pitch = nose.y - faceCenterY; // Up/Down turning
+
+            // Thresholds for distraction
+            // Note: pitch > 0 means looking DOWN (allowed for writing/reading)
+            // pitch < -0.015 means looking UP (not allowed)
+            // Math.abs(yaw) > 0.04 means looking LEFT or RIGHT
+            
+            const isLookingAway = Math.abs(yaw) > 0.04 || pitch < -0.015;
+
+            if (isLookingAway) {
+                aiStatus.innerText = "Looking Away!";
+                aiStatus.style.background = "rgba(239, 68, 68, 0.8)"; // Red
+                
+                if (!isDistracted) {
+                    isDistracted = true;
+                    handleDistraction();
+                }
+            } else {
+                aiStatus.innerText = "Focused";
+                aiStatus.style.background = "rgba(34, 197, 94, 0.8)"; // Green
+                
+                if (isDistracted) {
+                    isDistracted = false;
+                    handleFocus();
+                }
+            }
+        }
+
+        // Initialize MediaPipe Face Mesh
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        faceMesh.onResults(onResults);
+
+        // Start Camera Feed
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 320,
+            height: 240
+        });
+        
+        camera.start().then(() => {
+            statusText.innerText = "AI Camera Ready! Click Start Focus.";
+        }).catch(err => {
+            statusText.innerText = "Camera Denied. Running in Manual Mode.";
+            document.getElementById('camContainer').style.display = "none";
+        });
+
+    </script>
+</body>
+</html>
